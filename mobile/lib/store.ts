@@ -71,7 +71,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   duration: 0,
   queue: [],
   recitations: [],
-  feedLoading: true,
+  feedLoading: false,
   user: null,
   
   // Audio Actions

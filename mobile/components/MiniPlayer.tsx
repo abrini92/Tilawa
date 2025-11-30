@@ -1,6 +1,8 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, PanResponder } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAppStore } from '../lib/store';
+import AnimatedWaveform from './AnimatedWaveform';
 import * as Haptics from 'expo-haptics';
 
 interface MiniPlayerProps {
@@ -8,9 +10,46 @@ interface MiniPlayerProps {
 }
 
 export default function MiniPlayer({ onPress }: MiniPlayerProps) {
-  const { currentRecitation, isPlaying } = useAppStore();
+  const { currentRecitation, isPlaying, setCurrentRecitation } = useAppStore();
+  const translateY = useRef(new Animated.Value(0)).current;
+  const [progress] = useState(0.3); // TODO: Get real progress
 
   if (!currentRecitation) return null;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return Math.abs(gestureState.dy) > 10;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 100) {
+          // Swipe down to dismiss
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          Animated.timing(translateY, {
+            toValue: 200,
+            duration: 200,
+            useNativeDriver: true,
+          }).start(() => {
+            setCurrentRecitation(null);
+            translateY.setValue(0);
+          });
+        } else {
+          // Snap back
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 8,
+          }).start();
+        }
+      },
+    })
+  ).current;
 
   const handlePlayPause = async (e: any) => {
     e.stopPropagation();
@@ -19,12 +58,33 @@ export default function MiniPlayer({ onPress }: MiniPlayerProps) {
   };
 
   return (
-    <TouchableOpacity 
-      style={styles.container} 
-      onPress={onPress}
-      activeOpacity={0.9}
+    <Animated.View 
+      style={[
+        styles.container,
+        {
+          transform: [{ translateY }],
+        },
+      ]}
+      {...panResponder.panHandlers}
     >
-      <View style={styles.content}>
+      {/* Progress bar */}
+      <View style={styles.progressBarContainer}>
+        <LinearGradient
+          colors={['#10b981', '#059669']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[styles.progressBar, { width: `${progress * 100}%` }]}
+        />
+      </View>
+
+      {/* Swipe indicator */}
+      <View style={styles.swipeIndicator} />
+
+      <TouchableOpacity 
+        style={styles.content}
+        onPress={onPress}
+        activeOpacity={0.9}
+      >
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>
             {currentRecitation.reciter_name.charAt(0)}
@@ -38,6 +98,15 @@ export default function MiniPlayer({ onPress }: MiniPlayerProps) {
           <Text style={styles.reciterName} numberOfLines={1}>
             {currentRecitation.reciter_name}
           </Text>
+          {/* Mini waveform */}
+          <View style={styles.miniWaveform}>
+            <AnimatedWaveform 
+              isPlaying={isPlaying} 
+              barCount={20} 
+              height={16} 
+              color="#10b981" 
+            />
+          </View>
         </View>
 
         <TouchableOpacity 
@@ -48,8 +117,8 @@ export default function MiniPlayer({ onPress }: MiniPlayerProps) {
             {isPlaying ? '⏸' : '▶'}
           </Text>
         </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -113,5 +182,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#fff',
     marginLeft: 2,
+  },
+  progressBarContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+  },
+  progressBar: {
+    height: '100%',
+  },
+  swipeIndicator: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(100, 116, 139, 0.3)',
+    alignSelf: 'center',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  miniWaveform: {
+    marginTop: 4,
+    height: 16,
   },
 });

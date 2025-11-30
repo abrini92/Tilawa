@@ -1,5 +1,6 @@
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
-import { useState, useEffect, useCallback } from 'react';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, Animated } from 'react-native';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../lib/auth-context';
 import { getNotifications, markAsRead, markAllAsRead, subscribeToNotifications, Notification } from '../../lib/notifications-service';
 import * as Haptics from 'expo-haptics';
@@ -9,10 +10,18 @@ export default function Notifications() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const headerOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (user) {
       loadNotifications();
+      
+      // Animate header
+      Animated.timing(headerOpacity, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }).start();
       
       // Subscribe to real-time notifications
       const unsubscribe = subscribeToNotifications(user.id, (newNotification) => {
@@ -94,20 +103,27 @@ export default function Notifications() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Notifications</Text>
+      {/* Premium Header with Gradient */}
+      <LinearGradient
+        colors={['#10b981', '#059669', '#047857']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
+      >
+        <Animated.View style={[styles.header, { opacity: headerOpacity }]}>
+          <View>
+            <Text style={styles.headerTitle}>Notifications</Text>
+            {unreadCount > 0 && (
+              <Text style={styles.unreadCount}>{unreadCount} unread</Text>
+            )}
+          </View>
           {unreadCount > 0 && (
-            <Text style={styles.unreadCount}>{unreadCount} unread</Text>
+            <TouchableOpacity onPress={handleMarkAllAsRead} style={styles.markAllButton}>
+              <Text style={styles.markAllText}>✓ Mark all read</Text>
+            </TouchableOpacity>
           )}
-        </View>
-        {unreadCount > 0 && (
-          <TouchableOpacity onPress={handleMarkAllAsRead} style={styles.markAllButton}>
-            <Text style={styles.markAllText}>Mark all as read</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+        </Animated.View>
+      </LinearGradient>
 
       {/* Notifications List */}
       {loading ? (
@@ -145,36 +161,43 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8fafc',
   },
+  headerGradient: {
+    paddingTop: 60,
+    paddingBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    paddingHorizontal: 24,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#0f172a',
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#fff',
   },
   unreadCount: {
-    fontSize: 14,
-    color: '#10b981',
-    marginTop: 2,
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginTop: 4,
   },
   markAllButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#ecfdf5',
-    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   markAllText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#10b981',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#fff',
   },
   listContent: {
     paddingVertical: 8,

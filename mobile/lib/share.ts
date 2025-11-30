@@ -6,19 +6,23 @@
 import * as Sharing from 'expo-sharing';
 import { Alert } from 'react-native';
 import { trackEvent } from './analytics';
+import { generateShareCard } from '../components/ShareCard';
 
 export interface ShareRecitationParams {
   recitationId: string;
   surahName: string;
+  surahNumber?: number;
   reciterName: string;
   audioUrl?: string;
+  duration?: string;
+  plays?: number;
 }
 
 /**
  * Share a recitation
  */
 export async function shareRecitation(params: ShareRecitationParams) {
-  const { recitationId, surahName, reciterName, audioUrl } = params;
+  const { recitationId, surahName, surahNumber, reciterName, audioUrl, duration, plays } = params;
 
   try {
     // Check if sharing is available
@@ -29,8 +33,14 @@ export async function shareRecitation(params: ShareRecitationParams) {
       return;
     }
 
-    // Create share message
-    const message = `🎙️ Listen to ${surahName} recited by ${reciterName} on Tilawa!\n\n📱 Download Tilawa: https://tilawa.app\n\n#Quran #Tilawa #IslamicApp`;
+    // Generate premium share card message
+    const message = await generateShareCard({
+      reciterName,
+      surahName,
+      surahNumber: surahNumber || 0,
+      duration,
+      plays,
+    });
 
     // If audio URL is available, share the audio file
     if (audioUrl) {

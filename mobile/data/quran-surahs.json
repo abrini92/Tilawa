@@ -1,0 +1,122 @@
+[
+  {
+    "number": 1,
+    "name": {
+      "arabic": "الفاتحة",
+      "transliteration": "Al-Fatihah",
+      "translation": {
+        "en": "The Opening"
+      }
+    },
+    "verses": 7,
+    "revelationType": "Meccan"
+  },
+  {
+    "number": 2,
+    "name": {
+      "arabic": "البقرة",
+      "transliteration": "Al-Baqarah",
+      "translation": {
+        "en": "The Cow"
+      }
+    },
+    "verses": 286,
+    "revelationType": "Medinan"
+  },
+  {
+    "number": 3,
+    "name": {
+      "arabic": "آل عمران",
+      "transliteration": "Ali 'Imran",
+      "translation": {
+        "en": "Family of Imran"
+      }
+    },
+    "verses": 200,
+    "revelationType": "Medinan"
+  },
+  {
+    "number": 4,
+    "name": {
+      "arabic": "النساء",
+      "transliteration": "An-Nisa",
+      "translation": {
+        "en": "The Women"
+      }
+    },
+    "verses": 176,
+    "revelationType": "Medinan"
+  },
+  {
+    "number": 5,
+    "name": {
+      "arabic": "المائدة",
+      "transliteration": "Al-Ma'idah",
+      "translation": {
+        "en": "The Table Spread"
+      }
+    },
+    "verses": 120,
+    "revelationType": "Medinan"
+  },
+  {
+    "number": 36,
+    "name": {
+      "arabic": "يس",
+      "transliteration": "Ya-Sin",
+      "translation": {
+        "en": "Ya-Sin"
+      }
+    },
+    "verses": 83,
+    "revelationType": "Meccan"
+  },
+  {
+    "number": 67,
+    "name": {
+      "arabic": "الملك",
+      "transliteration": "Al-Mulk",
+      "translation": {
+        "en": "The Sovereignty"
+      }
+    },
+    "verses": 30,
+    "revelationType": "Meccan"
+  },
+  {
+    "number": 112,
+    "name": {
+      "arabic": "الإخلاص",
+      "transliteration": "Al-Ikhlas",
+      "translation": {
+        "en": "The Sincerity"
+      }
+    },
+    "verses": 4,
+    "revelationType": "Meccan"
+  },
+  {
+    "number": 113,
+    "name": {
+      "arabic": "الفلق",
+      "transliteration": "Al-Falaq",
+      "translation": {
+        "en": "The Daybreak"
+      }
+    },
+    "verses": 5,
+    "revelationType": "Meccan"
+  },
+  {
+    "number": 114,
+    "name": {
+      "arabic": "الناس",
+      "transliteration": "An-Nas",
+      "translation": {
+        "en": "Mankind"
+      }
+    },
+    "verses": 6,
+    "revelationType": "Meccan"
+  }
+]

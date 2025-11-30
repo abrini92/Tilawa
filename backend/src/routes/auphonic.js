@@ -77,6 +77,19 @@ export default async function auphonicRoutes(fastify, options) {
       };
     } catch (error) {
       fastify.log.error(error);
+      
+      // Track failed production in PostHog
+      if (fastify.posthog) {
+        fastify.posthog.capture({
+          distinctId: request.user.id,
+          event: 'auphonic_production_failed',
+          properties: {
+            error: error.message,
+            audioUrl
+          }
+        });
+      }
+      
       return reply.code(500).send({ error: error.message });
     }
   });
@@ -109,6 +122,19 @@ export default async function auphonicRoutes(fastify, options) {
       };
     } catch (error) {
       fastify.log.error(error);
+      
+      // Track failed start in PostHog
+      if (fastify.posthog) {
+        fastify.posthog.capture({
+          distinctId: request.user.id,
+          event: 'auphonic_start_failed',
+          properties: {
+            error: error.message,
+            productionId: uuid
+          }
+        });
+      }
+      
       return reply.code(500).send({ error: error.message });
     }
   });
@@ -140,6 +166,19 @@ export default async function auphonicRoutes(fastify, options) {
       };
     } catch (error) {
       fastify.log.error(error);
+      
+      // Track failed status check in PostHog
+      if (fastify.posthog) {
+        fastify.posthog.capture({
+          distinctId: request.user.id,
+          event: 'auphonic_status_check_failed',
+          properties: {
+            error: error.message,
+            productionId: uuid
+          }
+        });
+      }
+      
       return reply.code(500).send({ error: error.message });
     }
   });
@@ -150,15 +189,47 @@ export default async function auphonicRoutes(fastify, options) {
 
     fastify.log.info(`Auphonic webhook received for ${uuid}: ${status}`);
 
-    if (status === 'Done' && output_files) {
+    if (status === 'Done' && output_files && output_files.length > 0) {
+      // Get the enhanced audio URL
+      const enhancedUrl = output_files[0].download_url;
+      
+      fastify.log.info(`Enhanced audio ready: ${enhancedUrl}`);
+
       // Trigger Inngest function to download and store the enhanced audio
       await fastify.inngest.send({
         name: 'auphonic/completed',
         data: {
           productionId: uuid,
-          outputFiles: output_files
+          outputFiles: output_files,
+          enhancedUrl
         }
       });
+
+      // Track in PostHog
+      if (fastify.posthog) {
+        fastify.posthog.capture({
+          distinctId: 'system',
+          event: 'auphonic_processing_completed',
+          properties: {
+            productionId: uuid,
+            outputUrl: enhancedUrl
+          }
+        });
+      }
+    } else if (status === 'Error') {
+      fastify.log.error(`Auphonic production ${uuid} failed`);
+      
+      // Track error in PostHog
+      if (fastify.posthog) {
+        fastify.posthog.capture({
+          distinctId: 'system',
+          event: 'auphonic_processing_failed',
+          properties: {
+            productionId: uuid,
+            error: request.body.error_message
+          }
+        });
+      }
     }
 
     return { success: true };

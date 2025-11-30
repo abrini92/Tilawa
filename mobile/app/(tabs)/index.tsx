@@ -1,16 +1,22 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, RefreshControl, TextInput } from 'react-native';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, RefreshControl, TextInput, Animated, ScrollView } from 'react-native';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../lib/auth-context';
 import { apiClient } from '../../lib/api-client';
 import AudioPlayer from '../../components/AudioPlayer';
 import Waveform from '../../components/Waveform';
+import AnimatedWaveform from '../../components/AnimatedWaveform';
+import PressableCard from '../../components/PressableCard';
 import LikeButton from '../../components/LikeButton';
-import { RecitationCardSkeleton } from '../../components/SkeletonLoader';
+import LoadingScreen from '../../components/LoadingScreen';
+import Icon from '../../components/Icon';
 import * as Haptics from 'expo-haptics';
 import { getSurahAudio, AVAILABLE_RECITERS } from '../../lib/quran-audio-service';
 import { useAppStore } from '../../lib/store';
 import { supabase } from '../../lib/supabase';
 import { shareRecitation } from '../../lib/share';
+import { retrySupabaseQuery } from '../../lib/retry';
+import { useRouter } from 'expo-router';
 
 interface Recitation {
   id: string;
@@ -27,14 +33,31 @@ interface Recitation {
 
 export default function Home() {
   const { user } = useAuth();
+  const router = useRouter();
   const [selectedRecitation, setSelectedRecitation] = useState<Recitation | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  
+  // Discovery sections
+  const [trendingRecitations, setTrendingRecitations] = useState<Recitation[]>([]);
+  const [featuredReciter, setFeaturedReciter] = useState<any>(null);
+  const [newReciters, setNewReciters] = useState<any[]>([]);
+  const [popularSurahs, setPopularSurahs] = useState<any[]>([]);
+  
+  // Animation refs
+  const headerOpacity = useRef(new Animated.Value(0)).current;
+  const searchScale = useRef(new Animated.Value(0.95)).current;
+  const sectionsOpacity = useRef(new Animated.Value(0)).current;
   
   // Use global store
   const { 
     recitations, 
     feedLoading: loading,
+    currentRecitation,
     setRecitations,
     setFeedLoading,
     setCurrentRecitation,
@@ -43,14 +66,173 @@ export default function Home() {
 
   useEffect(() => {
     loadRecitations();
+    loadDiscoverySections();
   }, []);
+
+  // Animate when loading finishes
+  useEffect(() => {
+    if (!loading) {
+      // Animate header
+      Animated.timing(headerOpacity, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }).start();
+      
+      // Animate sections after header
+      setTimeout(() => {
+        Animated.timing(sectionsOpacity, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }).start();
+      }, 300);
+    }
+  }, [loading]);
+
+  const loadDiscoverySections = async () => {
+    try {
+      // Load trending (most played in last 7 days)
+      const { data: trending } = await supabase
+        .from('recitations')
+        .select('*')
+        .eq('status', 'ready')
+        .order('plays', { ascending: false })
+        .limit(5);
+      
+      if (trending) {
+        const formattedTrending = await formatRecitations(trending);
+        setTrendingRecitations(formattedTrending);
+      }
+
+      // Load new reciters (users who joined in last 7 days)
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      
+      const { data: newUsers } = await supabase
+        .from('profiles')
+        .select('*')
+        .gte('created_at', sevenDaysAgo.toISOString())
+        .limit(5);
+      
+      if (newUsers) {
+        setNewReciters(newUsers);
+      }
+
+      // Load popular surahs (most recited)
+      const { data: surahs } = await supabase
+        .from('recitations')
+        .select('surah_number, surah_name')
+        .eq('status', 'ready');
+      
+      if (surahs) {
+        // Count occurrences
+        const surahCounts = surahs.reduce((acc: any, rec: any) => {
+          const key = `${rec.surah_number}-${rec.surah_name}`;
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {});
+        
+        // Get top 4
+        const topSurahs = Object.entries(surahCounts)
+          .sort(([, a]: any, [, b]: any) => b - a)
+          .slice(0, 4)
+          .map(([key, count]) => {
+            const [number, name] = key.split('-');
+            return { surah_number: parseInt(number), surah_name: name, count };
+          });
+        
+        setPopularSurahs(topSurahs);
+      }
+
+      // Featured reciter (most active in last 30 days)
+      const { data: activeUsers } = await supabase
+        .from('recitations')
+        .select('user_id')
+        .eq('status', 'ready');
+      
+      if (activeUsers && activeUsers.length > 0) {
+        const userCounts = activeUsers.reduce((acc: any, rec: any) => {
+          acc[rec.user_id] = (acc[rec.user_id] || 0) + 1;
+          return acc;
+        }, {});
+        
+        const topUserId = Object.entries(userCounts)
+          .sort(([, a]: any, [, b]: any) => b - a)[0]?.[0];
+        
+        if (topUserId) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', topUserId)
+            .single();
+          
+          if (profile) {
+            const { data: userRecs } = await supabase
+              .from('recitations')
+              .select('*')
+              .eq('user_id', topUserId)
+              .eq('status', 'ready');
+            
+            setFeaturedReciter({
+              ...profile,
+              recitationsCount: userRecs?.length || 0,
+              totalPlays: userRecs?.reduce((sum: number, r: any) => sum + (r.plays || 0), 0) || 0,
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading discovery sections:', error);
+    }
+  };
+
+  const formatRecitations = async (recs: any[]): Promise<Recitation[]> => {
+    if (!recs || recs.length === 0) return [];
+    
+    const userIds = [...new Set(recs.map(r => r.user_id))];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, email, full_name, avatar_url')
+      .in('id', userIds);
+    
+    const profilesMap = new Map((profiles || []).map(p => [p.id, p]));
+    
+    return recs.map((rec: any) => {
+      const profile = profilesMap.get(rec.user_id);
+      return {
+        id: rec.id,
+        reciter_name: profile?.full_name || profile?.email || 'Anonymous',
+        reciter_avatar: profile?.avatar_url,
+        surah_name: rec.surah_name,
+        surah_number: rec.surah_number,
+        duration: formatDuration(rec.duration),
+        plays: rec.plays || 0,
+        likes: rec.likes || 0,
+        audio_url: rec.audio_url,
+        created_at: rec.created_at,
+      };
+    });
+  };
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadRecitations();
+    setPage(0);
+    setHasMore(true);
+    await loadRecitations(0, false);
     setRefreshing(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, []);
+
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    
+    setLoadingMore(true);
+    const nextPage = page + 1;
+    await loadRecitations(nextPage, true);
+    setPage(nextPage);
+    setLoadingMore(false);
+  };
 
   // Filter recitations based on search query
   const filteredRecitations = useMemo(() => {
@@ -64,18 +246,30 @@ export default function Home() {
     );
   }, [recitations, searchQuery]);
 
-  const loadRecitations = async () => {
+  const loadRecitations = async (pageNum: number = 0, append: boolean = false) => {
+    if (!append) {
+      setFeedLoading(true);
+    }
     try {
-      // ✅ LOAD REAL USER RECITATIONS FROM SUPABASE
-      // Charger les récitations d'abord
+      console.log('🔄 Loading recitations...');
+      const ITEMS_PER_PAGE = 10;
+      const from = pageNum * ITEMS_PER_PAGE;
+      const to = from + ITEMS_PER_PAGE - 1;
+
+      // ✅ LOAD REAL USER RECITATIONS FROM SUPABASE with pagination
       const { data: userRecitations, error: recitationsError } = await supabase
         .from('recitations')
         .select('*')
         .eq('status', 'ready')
         .order('created_at', { ascending: false })
-        .limit(20);
+        .range(from, to);
 
-      if (recitationsError) throw recitationsError;
+      if (recitationsError) {
+        console.error('❌ Error loading recitations:', recitationsError);
+        throw recitationsError;
+      }
+
+      console.log('✅ Loaded recitations:', userRecitations?.length || 0);
 
       // Si on a des récitations, charger les profils séparément
       if (userRecitations && userRecitations.length > 0) {
@@ -114,7 +308,15 @@ export default function Home() {
           };
         });
 
-        setRecitations(formattedRecitations);
+        // Check if we have more data
+        setHasMore(userRecitations.length === 10);
+        
+        // Append or replace recitations
+        if (append) {
+          setRecitations([...recitations, ...formattedRecitations]);
+        } else {
+          setRecitations(formattedRecitations);
+        }
         return;
       }
 
@@ -156,7 +358,7 @@ export default function Home() {
 
       setRecitations(recitationsData);
     } catch (error) {
-      console.error('Failed to load recitations:', error);
+      console.error('❌ Failed to load recitations:', error);
       // Fallback to mock data if API fails
       setRecitations([
         {
@@ -171,6 +373,7 @@ export default function Home() {
         },
       ]);
     } finally {
+      console.log('✅ Setting feedLoading to false');
       setFeedLoading(false);
     }
   };
@@ -191,8 +394,6 @@ export default function Home() {
   };
 
   const handleRecitationPress = async (item: Recitation) => {
-    // Haptic feedback on tap
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
     // Set current recitation for mini-player
     setCurrentRecitation(item);
@@ -218,129 +419,210 @@ export default function Home() {
   };
 
   const renderItem = ({ item }: { item: Recitation }) => (
-    <TouchableOpacity 
+    <PressableCard 
       style={styles.recitationCard}
       onPress={() => handleRecitationPress(item)}
-      activeOpacity={0.95}
+      hapticStyle="medium"
+      scaleValue={0.98}
     >
-      <View style={styles.cardHeader}>
-        <View style={styles.reciterInfo}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {item.reciter_name.charAt(0)}
-            </Text>
-          </View>
-          <View style={styles.reciterDetails}>
-            <Text style={styles.reciterName}>{item.reciter_name}</Text>
-            <Text style={styles.surahName}>
-              Surah {item.surah_number}: {item.surah_name}
-            </Text>
-          </View>
+      <View style={styles.reciterInfo}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>
+            {item.reciter_name.charAt(0)}
+          </Text>
+        </View>
+        <View style={styles.reciterDetails}>
+          <Text style={styles.reciterName}>{item.reciter_name}</Text>
+          <Text style={styles.surahName}>
+            {item.surah_name}
+          </Text>
+        </View>
+        <View style={styles.playIconContainer}>
+          <Icon name="play" size={24} color="#10b981" />
         </View>
       </View>
-      
-      {/* Waveform preview */}
-      <View style={styles.waveformContainer}>
-        <Waveform bars={35} height={50} color="#10b981" />
-      </View>
-      
-      <View style={styles.cardFooter}>
-        <View style={styles.stats}>
-          <Text style={styles.duration}>⏱ {item.duration}</Text>
-          <Text style={styles.plays}>▶ {item.plays.toLocaleString()}</Text>
-        </View>
-        <View style={styles.actions}>
-          <LikeButton 
-            recitationId={item.id}
-            initialLikes={item.likes || 0}
-            onLike={(liked) => console.log('Liked:', liked)}
-          />
-          <TouchableOpacity
-            style={styles.shareButton}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              shareRecitation({
-                recitationId: item.id,
-                surahName: item.surah_name,
-                reciterName: item.reciter_name,
-                audioUrl: item.audio_url,
-              });
-            }}
-          >
-            <Text style={styles.shareIcon}>↗️</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </TouchableOpacity>
+    </PressableCard>
   );
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Discover</Text>
-        <Text style={styles.headerSubtitle}>From your mosque to the world</Text>
-        
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <Text style={styles.searchIcon}>🔍</Text>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search by surah, reciter..."
-            placeholderTextColor="#94a3b8"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Text style={styles.clearIcon}>✕</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-      
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <RecitationCardSkeleton />
-          <RecitationCardSkeleton />
-          <RecitationCardSkeleton />
-        </View>
-      ) : recitations.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No recitations yet</Text>
-          <Text style={styles.emptySubtext}>Be the first to share!</Text>
-        </View>
+        <LoadingScreen message="Loading recitations..." />
       ) : (
-        <FlatList
-          data={filteredRecitations}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#10b981"
-              colors={['#10b981']}
-            />
-          }
-          getItemLayout={(data, index) => ({
-            length: 200, // Approximate item height
-            offset: 200 * index,
-            index,
-          })}
-          windowSize={5}
-          maxToRenderPerBatch={10}
-          removeClippedSubviews={true}
-          initialNumToRender={5}
-          ListEmptyComponent={
-            loading ? (
-              <Text style={styles.emptyText}>Loading recitations...</Text>
-            ) : (
-              <Text style={styles.emptyText}>No recitations found</Text>
-            )
-          }
-        />
+        <>
+          {/* Premium Header with Gradient */}
+          <LinearGradient
+            colors={['#10b981', '#059669', '#047857']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.headerGradient}
+          >
+            <Animated.View style={[styles.header, { opacity: headerOpacity }]}>
+              <Text style={styles.headerTitle}>Discover</Text>
+              <Text style={styles.headerSubtitle}>From your mosque to the world</Text>
+              
+              {/* Premium Search Bar with Glassmorphism */}
+              <Animated.View 
+                style={[
+                  styles.searchContainer,
+                  searchFocused && styles.searchFocused,
+                  { transform: [{ scale: searchScale }] }
+                ]}
+              >
+                <Icon name="search" size={18} color={searchFocused ? '#10b981' : '#64748b'} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search by surah, reciter..."
+                  placeholderTextColor="rgba(15, 23, 42, 0.5)"
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  onFocus={() => {
+                    setSearchFocused(true);
+                    Animated.spring(searchScale, {
+                      toValue: 1,
+                      useNativeDriver: true,
+                    }).start();
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                  onBlur={() => {
+                    setSearchFocused(false);
+                    Animated.spring(searchScale, {
+                      toValue: 0.95,
+                      useNativeDriver: true,
+                    }).start();
+                  }}
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity 
+                    onPress={() => {
+                      setSearchQuery('');
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }}
+                    style={{ padding: 4 }}
+                  >
+                    <Text style={{ color: 'rgba(255, 255, 255, 0.9)', fontSize: 18, fontWeight: '600' }}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </Animated.View>
+            </Animated.View>
+          </LinearGradient>
+      
+          {recitations.length === 0 && trendingRecitations.length === 0 ? (
+            <ScrollView 
+              contentContainerStyle={styles.emptyContainer}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor="#10b981"
+                />
+              }
+            >
+              <Animated.View style={[styles.emptyContent, { opacity: sectionsOpacity }]}>
+                <LinearGradient
+                  colors={['rgba(16, 185, 129, 0.1)', 'rgba(16, 185, 129, 0.05)']}
+                  style={styles.emptyIconContainer}
+                >
+                  <Text style={styles.emptyIcon}>🎙️</Text>
+                </LinearGradient>
+                <Text style={styles.emptyTitle}>Welcome to Tilawa!</Text>
+                <Text style={styles.emptyText}>
+                  Discover amazing Quran recitations from around the world.{'\n'}
+                  Join our community of reciters today.
+                </Text>
+                <PressableCard
+                  style={styles.emptyButton}
+                  onPress={() => {
+                    router.push('/(tabs)/upload');
+                  }}
+                  hapticStyle="medium"
+                >
+                  <LinearGradient
+                    colors={['#10b981', '#059669']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.emptyButtonGradient}
+                  >
+                    <Text style={styles.emptyButtonText}>🎙️ Start Recording</Text>
+                  </LinearGradient>
+                </PressableCard>
+                <TouchableOpacity 
+                  style={styles.emptySecondaryButton}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    onRefresh();
+                  }}
+                >
+                  <Text style={styles.emptySecondaryButtonText}>🔄 Refresh Feed</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            </ScrollView>
+          ) : (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor="#10b981"
+                  colors={['#10b981']}
+                />
+              }
+            >
+              <Animated.View style={{ opacity: sectionsOpacity }}>
+
+            {/* New Reciters */}
+            {newReciters.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionIcon}>🆕</Text>
+                  <Text style={styles.sectionTitle}>New Reciters</Text>
+                </View>
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.horizontalScroll}
+                >
+                  {newReciters.map((reciter) => (
+                    <TouchableOpacity
+                      key={reciter.id}
+                      style={styles.newReciterCard}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      }}
+                      activeOpacity={0.9}
+                    >
+                      <View style={styles.newBadge}>
+                        <Text style={styles.newBadgeText}>NEW</Text>
+                      </View>
+                      <View style={styles.newReciterAvatar}>
+                        <Text style={styles.newReciterAvatarText}>
+                          {(reciter.full_name || reciter.email || 'A').charAt(0)}
+                        </Text>
+                      </View>
+                      <Text style={styles.newReciterName} numberOfLines={1}>
+                        {reciter.full_name || reciter.email || 'Anonymous'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* All Recitations */}
+            {filteredRecitations.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionIcon}>🎵</Text>
+                  <Text style={styles.sectionTitle}>All Recitations</Text>
+                </View>
+                {filteredRecitations.map((item) => renderItem({ item }))}
+              </View>
+            )}
+              </Animated.View>
+            </ScrollView>
+          )}
+        </>
       )}
 
       {/* Audio Player Modal */}
@@ -365,69 +647,82 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8fafc',
   },
-  header: {
-    paddingHorizontal: 20,
+  headerGradient: {
     paddingTop: 60,
-    paddingBottom: 20,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    paddingBottom: 32,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  header: {
+    paddingHorizontal: 24,
   },
   headerTitle: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#0f172a',
-    marginBottom: 4,
-    letterSpacing: -0.5,
+    fontSize: 36,
+    fontWeight: '900',
+    color: '#fff',
+    marginBottom: 8,
+    letterSpacing: -1.5,
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
   },
   headerSubtitle: {
-    fontSize: 15,
-    color: '#64748b',
-    fontWeight: '400',
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontWeight: '500',
+    marginBottom: 24,
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    gap: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
   },
-  searchIcon: {
-    fontSize: 16,
-    marginRight: 8,
+  searchFocused: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderColor: '#fff',
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 8,
   },
   searchInput: {
     flex: 1,
-    paddingVertical: 12,
-    fontSize: 15,
+    fontSize: 16,
     color: '#0f172a',
-  },
-  clearIcon: {
-    fontSize: 18,
-    color: '#94a3b8',
-    padding: 4,
+    fontWeight: '500',
   },
   listContent: {
-    padding: 16,
+    padding: 20,
+    paddingTop: 24,
   },
   recitationCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)', // Glassmorphism
+    backgroundColor: '#fff',
     borderRadius: 20,
-    padding: 18,
-    marginBottom: 16,
+    padding: 16,
+    marginBottom: 12,
     shadowColor: '#10b981',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 4,
     borderWidth: 1,
     borderColor: 'rgba(16, 185, 129, 0.1)',
-  },
-  cardHeader: {
-    marginBottom: 12,
   },
   reciterInfo: {
     flexDirection: 'row',
@@ -443,26 +738,46 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarText: {
-    fontSize: 20,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '700',
     color: '#fff',
   },
   reciterDetails: {
     flex: 1,
   },
   reciterName: {
-    fontSize: 17,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     color: '#0f172a',
     marginBottom: 2,
   },
   surahName: {
     fontSize: 14,
     color: '#64748b',
+    fontWeight: '500',
+  },
+  playIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   waveformContainer: {
-    paddingVertical: 12,
+    paddingVertical: 20,
+    paddingHorizontal: 12,
     alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.06)',
+    borderRadius: 20,
+    marginVertical: 16,
+    borderWidth: 1.5,
+    borderColor: 'rgba(16, 185, 129, 0.15)',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
   cardFooter: {
     flexDirection: 'row',
@@ -475,6 +790,16 @@ const styles = StyleSheet.create({
   stats: {
     flexDirection: 'row',
     gap: 16,
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statText: {
+    fontSize: 13,
+    color: '#64748b',
+    fontWeight: '500',
   },
   actions: {
     flexDirection: 'row',
@@ -523,5 +848,315 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#64748b',
     textAlign: 'center',
+  },
+  loadingFooter: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  // Empty State
+  emptyIconContainer: {
+    marginBottom: 24,
+  },
+  emptyIcon: {
+    fontSize: 80,
+    textAlign: 'center',
+  },
+  emptyTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  emptyContent: {
+    alignItems: 'center',
+  },
+  emptyButton: {
+    marginTop: 24,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  emptyButtonGradient: {
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+  },
+  emptyButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  emptySecondaryButton: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  emptySecondaryButtonText: {
+    color: '#10b981',
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  // Sections
+  section: {
+    marginBottom: 32,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 16,
+    gap: 8,
+  },
+  sectionIcon: {
+    fontSize: 24,
+  },
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#0f172a',
+    letterSpacing: -0.5,
+  },
+  horizontalScroll: {
+    paddingHorizontal: 20,
+    gap: 16,
+  },
+  // Trending Cards
+  trendingCard: {
+    width: 140,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 16,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 6,
+    borderWidth: 1.5,
+    borderColor: 'rgba(16, 185, 129, 0.15)',
+  },
+  trendingBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  trendingBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  trendingAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#10b981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    alignSelf: 'center',
+    borderWidth: 2.5,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  trendingAvatarText: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  trendingReciter: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  trendingSurah: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  trendingStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  trendingPlays: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  // Featured Card
+  featuredCard: {
+    marginHorizontal: 20,
+    borderRadius: 24,
+    overflow: 'hidden',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.3,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  featuredGradient: {
+    padding: 32,
+    alignItems: 'center',
+  },
+  featuredAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    borderWidth: 3,
+    borderColor: '#fff',
+  },
+  featuredAvatarText: {
+    fontSize: 32,
+    fontWeight: '900',
+    color: '#fff',
+  },
+  featuredName: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#fff',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  featuredStats: {
+    flexDirection: 'row',
+    gap: 32,
+  },
+  featuredStat: {
+    alignItems: 'center',
+  },
+  featuredStatValue: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  featuredStatLabel: {
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontWeight: '600',
+  },
+  // New Reciters
+  newReciterCard: {
+    width: 120,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 16,
+    alignItems: 'center',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 6,
+    borderWidth: 1.5,
+    borderColor: 'rgba(16, 185, 129, 0.15)',
+  },
+  newBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#10b981',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  newBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  newReciterAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#10b981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    borderWidth: 2.5,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  newReciterAvatarText: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  newReciterName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0f172a',
+    textAlign: 'center',
+  },
+  // Surah Grid
+  surahGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  surahCard: {
+    width: '48%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 16,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 5,
+    borderWidth: 1.5,
+    borderColor: 'rgba(16, 185, 129, 0.15)',
+  },
+  surahNumber: {
+    fontSize: 32,
+    fontWeight: '900',
+    color: '#10b981',
+    marginBottom: 8,
+  },
+  surahCardName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 4,
+  },
+  surahCount: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '500',
   },
 });

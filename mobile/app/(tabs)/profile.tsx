@@ -1,13 +1,15 @@
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView, FlatList, ActivityIndicator, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView, FlatList, ActivityIndicator, Image, Animated } from 'react-native';
 import { useAuth } from '../../lib/auth-context';
 import { useRouter } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../lib/supabase';
 import { getFollowersCount, getFollowingCount } from '../../lib/social';
 import * as Haptics from 'expo-haptics';
 import Analytics from '../../lib/analytics';
 import EditProfileModal from '../../components/EditProfileModal';
 import { ProfileSkeleton } from '../../components/SkeletonLoader';
+import { useAppStore } from '../../lib/store';
 
 export default function Profile() {
   const { user, signOut } = useAuth();
@@ -20,6 +22,10 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'recitations' | 'liked'>('recitations');
   const [editModalVisible, setEditModalVisible] = useState(false);
+  
+  // Animations
+  const headerOpacity = useRef(new Animated.Value(0)).current;
+  const statsOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (user) {
@@ -27,6 +33,20 @@ export default function Profile() {
       loadStats();
       loadRecitations();
       loadLikedData();
+      
+      // Animate on mount
+      Animated.stagger(200, [
+        Animated.timing(headerOpacity, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(statsOpacity, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+      ]).start();
     }
   }, [user]);
 
@@ -143,15 +163,29 @@ export default function Profile() {
               }
               
               // Delete from database
-              const { error } = await supabase
+              const { error, count } = await supabase
                 .from('recitations')
-                .delete()
-                .eq('id', recitationId);
+                .delete({ count: 'exact' })
+                .eq('id', recitationId)
+                .eq('user_id', user?.id);
 
-              if (error) throw error;
+              if (error) {
+                console.error('Delete error:', error);
+                throw new Error(`Failed to delete: ${error.message}`);
+              }
+
+              if (count === 0) {
+                throw new Error('Recitation not found or you do not have permission to delete it');
+              }
+
+              console.log('Successfully deleted recitation:', recitationId);
 
               // Update local state
               setRecitations(prev => prev.filter(r => r.id !== recitationId));
+              
+              // Update global store (feed)
+              const { recitations: feedRecitations, setRecitations: setFeedRecitations } = useAppStore.getState();
+              setFeedRecitations(feedRecitations.filter(r => r.id !== recitationId));
               
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               Alert.alert('Success', 'Recitation deleted successfully');
@@ -203,62 +237,61 @@ export default function Profile() {
   }
 
   return (
-    <ScrollView style={styles.container}>
-      {/* Header with Avatar */}
-      <View style={styles.header}>
-        <View style={styles.avatarLarge}>
-          {profile?.avatar_url ? (
-            <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
-          ) : (
-            <Text style={styles.avatarText}>
-              {(profile?.full_name || user?.email)?.charAt(0).toUpperCase()}
-            </Text>
-          )}
-        </View>
-        <Text style={styles.name}>{profile?.full_name || 'Reciter'}</Text>
-        <Text style={styles.email}>{user?.email}</Text>
-        {profile?.bio && <Text style={styles.bio}>{profile.bio}</Text>}
-        
-        {/* Edit Button */}
-        <TouchableOpacity
-          style={styles.editButton}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            setEditModalVisible(true);
-          }}
-        >
-          <Text style={styles.editButtonText}>Edit Profile</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Stats */}
-      <View style={styles.statsContainer}>
-        <View style={styles.statItem}>
-          <Text style={styles.statNumber}>{recitations.length}</Text>
-          <Text style={styles.statLabel}>Recitations</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={styles.statNumber}>{followersCount}</Text>
-          <Text style={styles.statLabel}>Followers</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={styles.statNumber}>{followingCount}</Text>
-          <Text style={styles.statLabel}>Following</Text>
-        </View>
-      </View>
-
-      {/* Edit Profile Button */}
-      <TouchableOpacity 
-        style={styles.editButton}
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          Alert.alert('Coming Soon', 'Profile editing will be available soon!');
-        }}
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      {/* Premium Header with Gradient */}
+      <LinearGradient
+        colors={['#10b981', '#059669', '#047857']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
       >
-        <Text style={styles.editButtonText}>Edit Profile</Text>
-      </TouchableOpacity>
+        <Animated.View style={[styles.header, { opacity: headerOpacity }]}>
+          {/* Avatar with Premium Shadow */}
+          <View style={styles.avatarContainer}>
+            <View style={styles.avatarLarge}>
+              {profile?.avatar_url ? (
+                <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
+              ) : (
+                <Text style={styles.avatarText}>
+                  {(profile?.full_name || user?.email)?.charAt(0).toUpperCase()}
+                </Text>
+              )}
+            </View>
+          </View>
+          
+          <Text style={styles.name}>{profile?.full_name || 'Reciter'}</Text>
+          <Text style={styles.email}>{user?.email}</Text>
+          {profile?.bio && <Text style={styles.bio}>{profile.bio}</Text>}
+          
+          {/* Edit Button Premium */}
+          <TouchableOpacity
+            style={styles.editButtonPremium}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setEditModalVisible(true);
+            }}
+            activeOpacity={0.9}
+          >
+            <Text style={styles.editButtonPremiumText}>✏️ Edit Profile</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </LinearGradient>
+
+      {/* Premium Stats Cards */}
+      <Animated.View style={[styles.statsContainerPremium, { opacity: statsOpacity }]}>
+        <View style={styles.statCardPremium}>
+          <Text style={styles.statNumberPremium}>{recitations.length}</Text>
+          <Text style={styles.statLabelPremium}>Recitations</Text>
+        </View>
+        <View style={styles.statCardPremium}>
+          <Text style={styles.statNumberPremium}>{followersCount}</Text>
+          <Text style={styles.statLabelPremium}>Followers</Text>
+        </View>
+        <View style={styles.statCardPremium}>
+          <Text style={styles.statNumberPremium}>{followingCount}</Text>
+          <Text style={styles.statLabelPremium}>Following</Text>
+        </View>
+      </Animated.View>
 
       {/* Tabs */}
       <View style={styles.tabs}>
@@ -380,12 +413,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  headerGradient: {
+    paddingTop: 60,
+    paddingBottom: 32,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+  },
   header: {
-    backgroundColor: '#fff',
-    padding: 24,
+    paddingHorizontal: 24,
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+  },
+  avatarContainer: {
+    marginBottom: 16,
   },
   avatarLarge: {
     width: 100,
@@ -414,12 +456,12 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#0f172a',
+    color: '#fff',
     marginBottom: 4,
   },
   email: {
     fontSize: 14,
-    color: '#64748b',
+    color: 'rgba(255, 255, 255, 0.9)',
     marginBottom: 8,
   },
   bio: {
@@ -467,18 +509,6 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     backgroundColor: '#e2e8f0',
-  },
-  editButton: {
-    margin: 16,
-    paddingVertical: 12,
-    backgroundColor: '#10b981',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  editButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
   },
   tabs: {
     flexDirection: 'row',
@@ -542,39 +572,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748b',
   },
-  recitationItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-  },
-  recitationInfo: {
-    flex: 1,
-  },
-  recitationSurah: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0f172a',
-    marginBottom: 4,
-  },
-  recitationDate: {
-    fontSize: 12,
-    color: '#94a3b8',
-  },
-  recitationStats: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  recitationPlays: {
-    fontSize: 12,
-    color: '#64748b',
-  },
-  recitationLikes: {
-    fontSize: 12,
-    color: '#64748b',
-  },
   emptyState: {
     padding: 48,
     alignItems: 'center',
@@ -629,6 +626,51 @@ const styles = StyleSheet.create({
   signOutText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  // Premium styles
+  editButtonPremium: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  editButtonPremiumText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  statsContainerPremium: {
+    flexDirection: 'row',
+    padding: 20,
+    gap: 12,
+  },
+  statCardPremium: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.1)',
+  },
+  statNumberPremium: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#10b981',
+    marginBottom: 4,
+  },
+  statLabelPremium: {
+    fontSize: 12,
+    color: '#64748b',
     fontWeight: '600',
   },
   version: {

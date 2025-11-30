@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface SkeletonLoaderProps {
   width?: number | string;
@@ -9,43 +10,52 @@ interface SkeletonLoaderProps {
 }
 
 export function SkeletonLoader({ width = '100%', height = 20, borderRadius = 4, style }: SkeletonLoaderProps) {
-  const animatedValue = useRef(new Animated.Value(0)).current;
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.loop(
-      Animated.sequence([
-        Animated.timing(animatedValue, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(animatedValue, {
-          toValue: 0,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ])
+      Animated.timing(shimmerAnim, {
+        toValue: 1,
+        duration: 1500,
+        useNativeDriver: true,
+      })
     ).start();
   }, []);
 
-  const opacity = animatedValue.interpolate({
+  const translateX = shimmerAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.3, 0.7],
+    outputRange: [-300, 300],
   });
 
   return (
-    <Animated.View
+    <View
       style={[
         styles.skeleton,
         {
           width,
           height,
           borderRadius,
-          opacity,
+          overflow: 'hidden',
         },
         style,
       ]}
-    />
+    >
+      <Animated.View
+        style={[
+          styles.shimmer,
+          {
+            transform: [{ translateX }],
+          },
+        ]}
+      >
+        <LinearGradient
+          colors={['rgba(226, 232, 240, 0)', 'rgba(16, 185, 129, 0.15)', 'rgba(226, 232, 240, 0)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.shimmerGradient}
+        />
+      </Animated.View>
+    </View>
   );
 }
 
@@ -113,6 +123,16 @@ export function ProfileSkeleton() {
 const styles = StyleSheet.create({
   skeleton: {
     backgroundColor: '#e2e8f0',
+    position: 'relative',
+  },
+  shimmer: {
+    width: 300,
+    height: '100%',
+    position: 'absolute',
+  },
+  shimmerGradient: {
+    width: '100%',
+    height: '100%',
   },
   card: {
     backgroundColor: '#fff',

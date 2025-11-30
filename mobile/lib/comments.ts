@@ -23,10 +23,24 @@ export interface Comment {
 }
 
 /**
+ * Check if ID is a valid UUID
+ */
+function isValidUUID(id: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(id);
+}
+
+/**
  * Get comments for a recitation
  */
 export async function getComments(recitationId: string): Promise<Comment[]> {
   try {
+    // Skip if not a valid UUID (demo recitations)
+    if (!isValidUUID(recitationId)) {
+      console.log('Skipping comments for demo recitation:', recitationId);
+      return [];
+    }
+
     // Load comments first
     const { data: comments, error: commentsError } = await supabase
       .from('comments')
@@ -128,6 +142,11 @@ export async function deleteComment(commentId: string): Promise<boolean> {
  */
 export async function getCommentCount(recitationId: string): Promise<number> {
   try {
+    // Skip if not a valid UUID (demo recitations)
+    if (!isValidUUID(recitationId)) {
+      return 0;
+    }
+
     const { count, error } = await supabase
       .from('comments')
       .select('*', { count: 'exact', head: true })

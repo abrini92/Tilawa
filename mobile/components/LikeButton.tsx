@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { TouchableOpacity, Text, StyleSheet, Animated } from 'react-native';
-import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/auth-context';
+import * as Haptics from 'expo-haptics';
+import { pulse } from '../lib/animations';
+import Icon from './Icon';
 
 interface LikeButtonProps {
   recitationId: string;
@@ -18,58 +21,63 @@ export default function LikeButton({
 }: LikeButtonProps) {
   const [liked, setLiked] = useState(isLiked);
   const [likes, setLikes] = useState(initialLikes);
-  const [scaleAnim] = useState(new Animated.Value(1));
+  const scale = useRef(new Animated.Value(1)).current;
 
   const handleLike = async () => {
     // Haptic feedback
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    // Animation
-    Animated.sequence([
-      Animated.timing(scaleAnim, {
-        toValue: 1.3,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        friction: 3,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    // Animate with pulse
+    pulse(scale).start();
 
-    // Toggle like
+    // ✨ OPTIMISTIC UI - Update immediately
     const newLiked = !liked;
+    const previousLiked = liked;
+    const previousLikes = likes;
+    
     setLiked(newLiked);
     setLikes(prev => newLiked ? prev + 1 : prev - 1);
     
-    // Save to Supabase
+    if (onLike) {
+      onLike(newLiked);
+    }
+    
+    // Save to Supabase in background
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        // Rollback if no user
+        setLiked(previousLiked);
+        setLikes(previousLikes);
+        return;
+      }
 
       if (newLiked) {
         // Add like
-        await supabase
+        const { error } = await supabase
           .from('likes')
           .insert({
             user_id: user.id,
             recitation_id: recitationId,
           });
+        
+        if (error) throw error;
       } else {
         // Remove like
-        await supabase
+        const { error } = await supabase
           .from('likes')
           .delete()
           .eq('user_id', user.id)
           .eq('recitation_id', recitationId);
+        
+        if (error) throw error;
       }
     } catch (error) {
       console.error('Error toggling like:', error);
-    }
-    
-    if (onLike) {
-      onLike(newLiked);
+      // Rollback on error
+      setLiked(previousLiked);
+      setLikes(previousLikes);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
 
@@ -79,15 +87,11 @@ export default function LikeButton({
       onPress={handleLike}
       activeOpacity={0.7}
     >
-      <Animated.Text 
-        style={[
-          styles.icon, 
-          liked && styles.iconLiked,
-          { transform: [{ scale: scaleAnim }] }
-        ]}
+      <Animated.View 
+        style={{ transform: [{ scale }] }}
       >
-        {liked ? '❤️' : '🤍'}
-      </Animated.Text>
+        <Icon name="heart" size={20} color={liked ? '#ef4444' : '#94a3b8'} filled={liked} />
+      </Animated.View>
       <Text style={[styles.count, liked && styles.countLiked]}>
         {likes.toLocaleString()}
       </Text>

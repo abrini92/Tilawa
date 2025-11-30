@@ -46,7 +46,8 @@
       },
       "eas": {
         "projectId": "your-project-id"
-      }
+      },
+      "sentryDsn": "https://9d055dee0c65e2fa4f8e90bf426da06a@o4510450908463104.ingest.de.sentry.io/4510451008929872"
     }
   }
 }

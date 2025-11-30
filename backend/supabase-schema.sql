@@ -58,10 +58,14 @@ create table if not exists recitations (
   surah_name text not null,
   verse_from int not null,
   verse_to int not null,
-  audio_url text not null,
+  audio_url text not null,  -- Current audio URL (enhanced if available, otherwise original)
+  audio_url_original text,  -- Original uploaded file
+  audio_url_enhanced text,  -- Auphonic processed file (if available)
+  auphonic_production_id text,  -- Auphonic production UUID
   duration int, -- in seconds
   plays int default 0,
   status text default 'processing' check (status in ('processing', 'ready', 'failed')),
+  enhancement text check (enhancement in ('clean', 'studio', 'mosque_light', 'mosque_deep')),
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -90,12 +94,14 @@ create index recitations_created_at_idx on recitations(created_at desc);
 -- ============================================
 -- 4. STORAGE BUCKETS
 -- ============================================
--- Run this in Supabase Dashboard > Storage
+-- Run this in Supabase Dashboard > Storage > Create new bucket
+-- Bucket name: 'recitations'
+-- Settings: 
+--   - Public bucket: YES
+--   - Max file size: 50MB (50000000 bytes)
+--   - Allowed MIME types: audio/mpeg, audio/wav, audio/x-wav, audio/webm, audio/mp4, audio/aac
 
--- Create 'recitations' bucket (public)
--- Settings: Public bucket, Max file size: 50MB, Allowed MIME types: audio/*
-
--- Storage policies
+-- Storage policies (run after bucket creation)
 create policy "Anyone can view recitations"
   on storage.objects for select
   using (bucket_id = 'recitations');
@@ -105,6 +111,20 @@ create policy "Authenticated users can upload recitations"
   with check (
     bucket_id = 'recitations' 
     and auth.role() = 'authenticated'
+  );
+
+create policy "Users can update own recitations"
+  on storage.objects for update
+  using (
+    bucket_id = 'recitations'
+    and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "Users can delete own recitations"
+  on storage.objects for delete
+  using (
+    bucket_id = 'recitations'
+    and auth.uid()::text = (storage.foldername(name))[1]
   );
 
 -- ============================================

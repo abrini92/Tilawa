@@ -1,15 +1,13 @@
 import { Tabs, useRouter } from 'expo-router';
 import { View, Text, StyleSheet } from 'react-native';
 import { useState, useEffect } from 'react';
-import MiniPlayer from '../../components/MiniPlayer';
-import { useAppStore } from '../../lib/store';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth-context';
 import { getUnreadCount, subscribeToNotifications } from '../../lib/notifications-service';
 
 export default function TabLayout() {
   const router = useRouter();
   const { user } = useAuth();
-  const { currentRecitation } = useAppStore();
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
@@ -37,35 +35,36 @@ export default function TabLayout() {
         screenOptions={{
           headerShown: true,
           tabBarActiveTintColor: '#10b981',
-          tabBarStyle: {
-            paddingBottom: currentRecitation ? 60 : 0, // Space for mini-player
-          },
         }}
       >
         <Tabs.Screen
           name="index"
           options={{
-            title: 'Discover',
+            headerShown: false,
             tabBarLabel: 'Home',
-            tabBarIcon: ({ color }) => <View style={{ width: 24, height: 24, backgroundColor: color }} />,
+            tabBarIcon: ({ color, focused }) => (
+              <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
+            ),
           }}
         />
         <Tabs.Screen
-          name="upload"
+          name="studio"
           options={{
-            title: 'Record',
-            tabBarLabel: 'Upload',
-            tabBarIcon: ({ color }) => <View style={{ width: 24, height: 24, backgroundColor: color }} />,
+            headerShown: false,
+            tabBarLabel: 'Studio',
+            tabBarIcon: ({ color, focused }) => (
+              <Ionicons name={focused ? 'mic' : 'mic-outline'} size={24} color={color} />
+            ),
           }}
         />
         <Tabs.Screen
           name="notifications"
           options={{
-            title: 'Notifications',
+            headerShown: false,
             tabBarLabel: 'Notifications',
-            tabBarIcon: ({ color }) => (
+            tabBarIcon: ({ color, focused }) => (
               <View>
-                <View style={{ width: 24, height: 24, backgroundColor: color }} />
+                <Ionicons name={focused ? 'notifications' : 'notifications-outline'} size={24} color={color} />
                 {unreadCount > 0 && (
                   <View style={styles.badge}>
                     <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
@@ -78,20 +77,14 @@ export default function TabLayout() {
         <Tabs.Screen
           name="profile"
           options={{
-            title: 'Profile',
+            headerShown: false,
             tabBarLabel: 'Profile',
-            tabBarIcon: ({ color }) => <View style={{ width: 24, height: 24, backgroundColor: color }} />,
+            tabBarIcon: ({ color, focused }) => (
+              <Ionicons name={focused ? 'person' : 'person-outline'} size={24} color={color} />
+            ),
           }}
         />
       </Tabs>
-      
-      {/* Mini Player - Always visible when audio is playing */}
-      {currentRecitation && (
-        <MiniPlayer onPress={() => {
-          // TODO: Open full player modal
-          console.log('Open full player');
-        }} />
-      )}
     </View>
   );
 }
