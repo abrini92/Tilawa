@@ -197,7 +197,8 @@ export default async function uploadRoutes(fastify, options) {
                 format: 'mp3',
                 bitrate: 192,
                 ending: 'enhanced.mp3'
-              }]
+              }],
+              webhook: process.env.WEBHOOK_URL || 'https://tilawa-production.up.railway.app/api/auphonic/webhook'
             })
           });
 
