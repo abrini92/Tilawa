@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, ActivityIndicator, ScrollView } from 'react-native';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -133,6 +133,12 @@ export function EnhancementStudio({
         <View style={{ width: 28 }} />
       </View>
 
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+
       {/* Surah Info */}
       <View style={styles.surahInfo}>
         <Text style={styles.surahNumber}>Surah {surah.number}</Text>
@@ -230,6 +236,8 @@ export function EnhancementStudio({
           </LinearGradient>
         </TouchableOpacity>
       </View>
+
+      </ScrollView>
     </View>
   );
 }
@@ -238,6 +246,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F9FAFB',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100,
   },
   header: {
     flexDirection: 'row',

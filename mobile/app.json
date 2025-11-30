@@ -16,14 +16,24 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.tilawa.app"
+      "bundleIdentifier": "com.tilawa.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Tilawa needs access to your microphone to record Quran recitations.",
+        "NSCameraUsageDescription": "Tilawa needs access to your camera for profile pictures."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.tilawa.app"
+      "package": "com.tilawa.app",
+      "permissions": [
+        "RECORD_AUDIO",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -31,6 +41,12 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow Tilawa to access your microphone to record Quran recitations."
+        }
+      ],
       [
         "@sentry/react-native/expo",
         {

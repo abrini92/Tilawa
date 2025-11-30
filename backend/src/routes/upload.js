@@ -12,7 +12,12 @@ const ALLOWED_MIME_TYPES = [
   'audio/mp4',
   'audio/aac',
   'audio/m4a',
-  'audio/ogg'
+  'audio/x-m4a',
+  'audio/mp4a-latm',
+  'audio/ogg',
+  'audio/caf',
+  'audio/x-caf',
+  'application/octet-stream' // Fallback for unknown types
 ];
 
 /**
