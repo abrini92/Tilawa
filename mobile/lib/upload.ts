@@ -41,11 +41,25 @@ export async function uploadAudio(
     // Extract filename from URI
     const filename = fileUri.split('/').pop() || `surah_${surahNumber}.m4a`;
     
+    // Detect MIME type from file extension
+    const extension = filename.split('.').pop()?.toLowerCase();
+    let mimeType = 'audio/m4a';
+    
+    if (extension === 'caf') {
+      mimeType = 'audio/x-caf';
+    } else if (extension === 'm4a') {
+      mimeType = 'audio/x-m4a';
+    } else if (extension === 'mp3') {
+      mimeType = 'audio/mpeg';
+    } else if (extension === 'wav') {
+      mimeType = 'audio/wav';
+    }
+    
     // Append file
     formData.append('file', {
       uri: fileUri,
       name: filename,
-      type: 'audio/m4a', // expo-av records in m4a on iOS
+      type: mimeType,
     } as any);
     
     // Append enhancement type
@@ -65,6 +79,11 @@ export async function uploadAudio(
     const data = await response.json();
 
     if (!response.ok) {
+      console.error('Upload failed:', {
+        status: response.status,
+        error: data.error,
+        data
+      });
       return { 
         success: false, 
         error: data.error || `Upload failed with status ${response.status}` 

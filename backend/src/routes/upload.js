@@ -227,18 +227,25 @@ export default async function uploadRoutes(fastify, options) {
         }
       }
 
-      // Trigger Inngest function for processing
-      await fastify.inngest.send({
-        name: 'audio/uploaded',
-        data: {
-          fileId: uploadData.id,
-          userId: request.user.id,
-          filename,
-          publicUrl,
-          enhancement,
-          auphonicProductionId
+      // Trigger Inngest function for processing (optional)
+      if (fastify.inngest && process.env.INNGEST_EVENT_KEY) {
+        try {
+          await fastify.inngest.send({
+            name: 'audio/uploaded',
+            data: {
+              fileId: uploadData.id,
+              userId: request.user.id,
+              filename,
+              publicUrl,
+              enhancement,
+              auphonicProductionId
+            }
+          });
+        } catch (inngestError) {
+          fastify.log.warn('Inngest event failed (non-critical):', inngestError.message);
+          // Continue without Inngest
         }
-      });
+      }
 
       return {
         success: true,
